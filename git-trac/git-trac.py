@@ -55,7 +55,7 @@ def add_comment(ticket_id, repo, branch, commits):
                 VALUES (%s, %s, 'git', 'comment',
                     COALESCE((SELECT max(oldvalue::integer) FROM ticket_change WHERE ticket = %s
                     AND field = 'comment'), 0) + 1, %s)""",
-                    (ticket_id, max(commit['date'] for commit in commits), ticket_id, string))
+                    (ticket_id, max(commit['date'] for commit in commits) * 1000000, ticket_id, string))
     db.commit()
 
 
