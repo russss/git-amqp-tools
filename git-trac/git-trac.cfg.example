@@ -1,0 +1,15 @@
+[amqp]
+host=
+port=
+user=
+password=
+vhost=
+exchange=
+key=
+
+[db]
+host=
+user=
+password=
+port=
+db=
