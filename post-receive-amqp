@@ -1,0 +1,73 @@
+#!/usr/bin/env python
+""" Git post-receive hook to publish commit data to an AMQP topic.
+
+    apt-get install python-git python-amqplib
+    or:
+    easy_install amqplib gitpython
+"""
+import os, sys, json
+from datetime import datetime
+from git import *
+from amqplib import client_0_8 as amqp
+
+from subprocess import Popen
+del Popen.__del__
+
+AMQP_HOST = ''
+AMQP_PORT = 5672
+AMQP_USER = ''
+AMQP_PASSWORD = ''
+AMQP_VHOST = ''
+AMQP_EXCHANGE = ''
+
+def get_commits(repo, ref, from_commit, to_commit):
+    if from_commit == '0' * 40:
+        # Branch create
+        return get_new_revisions(repo, ref, to_commit)
+    if to_commit == '0' * 40:
+        # Branch delete
+        return []
+    return get_new_revisions(repo, ref, '%s..%s' % (from_commit, to_commit))
+
+def format_actor(actor):
+    return {'name': actor.name, 'email': actor.email}
+
+def format_commit(commit):
+    return {'author': format_actor(commit.author),
+            'committer': format_actor(commit.committer),
+            'message': commit.message,
+            'sha': commit.hexsha,
+            'date': commit.committed_date}
+
+def format_branch(commits):
+    return [format_commit(commit) for commit in commits]
+
+def get_new_revisions(repo, ref, revspec):
+    """ This magic fetches previously-unseen revisions, and is based on the
+        show-new-revisions function in git's post-receive-email hook."""
+    other_branches = repo.git.for_each_ref('refs/heads', format='%(refname)').split("\n")
+    other_branches.remove(ref)
+    revs = repo.git.rev_parse("--not", other_branches).split("\n")
+    return repo.iter_commits(revs + [revspec])
+
+def send_message(host, port, user, password, vhost, exchange_name, key, message):
+    conn = amqp.Connection(host=host, port=port, userid=user, password=password, virtual_host=vhost)
+    channel = conn.channel()
+    channel.access_request('/data', active=True, read=True)
+    channel.exchange_declare(exchange_name, type='topic', durable=True, auto_delete=False)
+    message = amqp.Message(timestamp=datetime.utcnow(), body=json.dumps(message), delivery_mode=2,
+                        content_type='application/json')
+    channel.basic_publish(message, exchange_name, routing_key=key)
+
+if __name__ == '__main__':
+    repo = Repo(os.environ['GIT_DIR'])
+    out = {}
+    for line in sys.stdin.xreadlines():
+        old, new, ref = line.strip().split(' ')
+        commits = list(get_commits(repo, ref, old, new))
+        if len(commits) > 0:
+            out[ref] = format_branch(commits)
+    if len(out) > 0:
+        key = os.path.basename(repo.working_dir)
+        send_message(AMQP_HOST, AMQP_PORT, AMQP_USER, AMQP_PASSWORD, AMQP_VHOST, AMQP_EXCHANGE, key, out)
+
