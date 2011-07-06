@@ -51,7 +51,7 @@ def add_comment(ticket_id, repo, branch, commits):
     for commit in commits:
         string += "\n * " + commit_to_text(repo, commit)
     curs.execute("""INSERT INTO ticket_change (ticket, time, author, field, oldvalue, newvalue)
-                VALUES (%s, %s, 'git', 'comment', 
+                VALUES (%s, %s, 'git', 'comment',
                     COALESCE((SELECT max(oldvalue::integer) FROM ticket_change WHERE ticket = %s
                     AND field = 'comment'), 0) + 1, %s)""",
                     (ticket_id, max(commit['date'] for commit in commits), ticket_id, string))
