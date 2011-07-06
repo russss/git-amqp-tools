@@ -5,7 +5,8 @@ from collections import defaultdict
 import psycopg2
 import re, json
 
-TICKET_REGEX = r"\[?ticket[ :\-#]+([0-9]+)\]?"
+BRANCH_TICKET_REGEX = r"ticket-([0-9]+)"
+COMMIT_TICKET_REGEX = r"\[?ticket[ :\-#]+([0-9]+)\]?"
 
 parser = OptionParser()
 parser.add_option("-f", "--config", dest="config", help="Config File", default="git-trac.cfg")
@@ -39,7 +40,7 @@ def connect_db():
 
 def commit_to_text(repo, commit):
     return "%s@%s: %s" % (repo, commit['sha'][0:7],
-                re.sub(TICKET_REGEX, '', commit['message']).split("\n")[0])
+                re.sub(COMMIT_TICKET_REGEX, '', commit['message']).split("\n")[0])
 
 def add_comment(ticket_id, repo, branch, commits):
     db = connect_db()
@@ -51,20 +52,34 @@ def add_comment(ticket_id, repo, branch, commits):
     for commit in commits:
         string += "\n * " + commit_to_text(repo, commit)
     curs.execute("""INSERT INTO ticket_change (ticket, time, author, field, oldvalue, newvalue)
-                VALUES (%s, %s, 'git', 'comment', 
+                VALUES (%s, %s, 'git', 'comment',
                     COALESCE((SELECT max(oldvalue::integer) FROM ticket_change WHERE ticket = %s
                     AND field = 'comment'), 0) + 1, %s)""",
                     (ticket_id, max(commit['date'] for commit in commits), ticket_id, string))
     db.commit()
+
+
+def extract_ticket_number(branch, message):
+    """
+    Extracts the ticket number from the branch or, failing that, the
+    commit message.
+    """
+    match = re.search(BRANCH_TICKET_REGEX, branch, re.I | re.M)
+    if match is None:
+        match = re.search(COMMIT_TICKET_REGEX, message, re.I | re.M)
+    if match is not None:
+        return match.group(1)
+    return None
+
 
 def process_message(msg):
     data = json.loads(msg.body)
     for branch, commits in data.items():
         ticket_commits = defaultdict(list)
         for commit in commits:
-            match = re.search(TICKET_REGEX, commit['message'], re.I | re.M)
-            if match is not None:
-                ticket_commits[match.group(1)].append(commit)
+            ticket_number = extract_ticket_number(branch, commit['message'])
+            if ticket_number is not None:
+                ticket_commits[ticket_number].append(commit)
         for ticket_id, commits in ticket_commits.items():
             add_comment(ticket_id, msg.delivery_info['routing_key'], branch, commits)
 
