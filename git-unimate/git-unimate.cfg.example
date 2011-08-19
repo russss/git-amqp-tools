@@ -1,0 +1,12 @@
+[amqp]
+host=
+port=
+user=
+password=
+vhost=
+exchange=
+key=
+
+[unimate]
+host=
+port=
